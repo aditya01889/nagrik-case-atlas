@@ -16,7 +16,7 @@ jobs:
       - name: Rebuild and extract source archive
         run: |
           set -euo pipefail
-          cat .source-staging/part-*.b64 | base64 -d > nca-source.tar.xz
+          cat .source-staging/part-01.b64 .source-staging/part-02a.b64 .source-staging/part-02b.b64 .source-staging/part-03.b64 .source-staging/part-04.b64 .source-staging/part-05.b64 .source-staging/part-06.b64 .source-staging/part-07.b64 .source-staging/part-08.b64 | base64 -d > nca-source.tar.xz
           tar -xJf nca-source.tar.xz
           rm -f nca-source.tar.xz
           rm -rf .source-staging
