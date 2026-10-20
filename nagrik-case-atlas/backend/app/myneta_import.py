@@ -119,45 +119,39 @@ def fetch_winners(client: httpx.Client):
 
 
 def parse_profile(soup: BeautifulSoup):
-    all_text = text(soup)
-    m = re.search(r"Number of Criminal Cases\s*:?\s*([\d,]+)", all_text, re.I)
+    all_text = " ".join(soup.get_text(" ", strip=True).replace("\\xa0", " ").split())
+    m = re.search(r"Number of Criminal Cases\\s*:?\\s*([\\d,]+)", all_text, re.I)
     declared = int(m.group(1).replace(",", "")) if m else None
     state = None
     constituency = None
     for h in soup.find_all(["h3", "h4", "h5", "h6"]):
         value = text(h)
-        match = re.match(r"(.+?)\s*\(([^()]+)\)\s*$", value)
+        match = re.match(r"(.+?)\\s*\\(([^()]+)\\)\\s*$", value)
         if match and len(value) < 140 and not re.search(r"criminal|asset|education|detail", value, re.I):
             constituency, state = match.group(1).strip(), match.group(2).strip()
             break
+
     cases = []
     seen = set()
-    for heading in soup.find_all(["h2", "h3", "h4", "h5"]):
+    heading_tags = {"h3", "h4", "h5", "h6"}
+    for heading in soup.find_all(["h3", "h4", "h5", "h6"]):
         label = text(heading)
-        if not re.search(r"Cases\s+where\s+(Pending|Convicted)", label, re.I):
+        if not re.search(r"Cases\\s+where\\s+(Pending|Convicted)", label, re.I):
             continue
         section = "Pending" if re.search(r"Pending", label, re.I) else "Convicted"
-        table = heading.find_next("table")
-        if not table:
-            continue
-        for row in table.find_all("tr"):
-            cells = row.find_all(["td", "th"], recursive=False)
-            vals = [text(c) for c in cells]
-            if len(vals) < 3 or all(c.name == "th" for c in cells):
-                continue
-            if re.search(r"^serial\s*no|^fir\s*no|^case\s*no", " ".join(vals), re.I):
-                continue
-            if not any(vals):
-                continue
-            # Ignore non-case summary tables that may follow a heading on malformed pages.
-            if len(vals) < 4:
+        # Iterate rows until the next section heading. This is more resilient than assuming
+        # the case rows are in the very next table (some MyNeta pages wrap tables differently).
+        for node in heading.find_all_next(["tr", "h3", "h4", "h5", "h6"]):
+            if node.name in heading_tags:
+                break
+            cells = node.find_all(["td", "th"], recursive=False)
+            vals = [text(cell) for cell in cells]
+            if len(vals) < 4 or not re.fullmatch(r"\\d+", vals[0] or ""):
                 continue
             key = (section, tuple(vals))
             if key in seen:
                 continue
             seen.add(key)
-            # Common MyNeta columns: serial, FIR, case number, court, IPC/BNS, other acts,
-            # charges framed, date charges framed, appeal/present status.
             fir = vals[1] if len(vals) > 1 else ""
             case_no = vals[2] if len(vals) > 2 else ""
             court = vals[3] if len(vals) > 3 else ""
@@ -179,7 +173,7 @@ def parse_profile(soup: BeautifulSoup):
             ]
             cases.append({"section": section, "serial": vals[0], "fir": fir, "case_no": case_no,
                           "court": court, "provisions": provisions, "other_acts": other_acts,
-                          "summary": "; ".join(p for p in detail_parts if p)})
+                          "summary": "; ".join(part for part in detail_parts if part)})
     return {"declared_count": declared, "state": state, "constituency": constituency, "cases": cases}
 
 
