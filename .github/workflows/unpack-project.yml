@@ -2,7 +2,7 @@ name: Unpack Nagrik Case Atlas source
 on:
   push:
     paths:
-      - 'nca-source.tar.xz'
+      - '.source-staging/READY'
   workflow_dispatch:
 permissions:
   contents: write
@@ -13,12 +13,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
-      - name: Extract full source tree
+      - name: Rebuild and extract source archive
         run: |
+          set -euo pipefail
+          cat .source-staging/part-*.b64 | base64 -d > nca-source.tar.xz
           tar -xJf nca-source.tar.xz
           rm -f nca-source.tar.xz
+          rm -rf .source-staging
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'Import complete Nagrik Case Atlas source' || exit 0
+          git commit -m 'Import complete Nagrik Case Atlas source'
           git push
