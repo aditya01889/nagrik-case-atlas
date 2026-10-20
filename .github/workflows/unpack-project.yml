@@ -1,0 +1,24 @@
+name: Unpack Nagrik Case Atlas source
+on:
+  push:
+    paths:
+      - 'nca-source.tar.xz'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Extract full source tree
+        run: |
+          tar -xJf nca-source.tar.xz
+          rm -f nca-source.tar.xz
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Import complete Nagrik Case Atlas source' || exit 0
+          git push
