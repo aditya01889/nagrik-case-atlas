@@ -123,14 +123,14 @@ def fetch_winners(client: httpx.Client):
 
 
 def parse_profile(soup: BeautifulSoup):
-    all_text = " ".join(soup.get_text(" ", strip=True).replace("\\xa0", " ").split())
-    m = re.search(r"Number of Criminal Cases\\s*:?\\s*([\\d,]+)", all_text, re.I)
+    all_text = " ".join(soup.get_text(" ", strip=True).replace("\xa0", " ").split())
+    m = re.search(r"Number\s+of\s+Criminal\s+Cases[^0-9]{0,30}([0-9,]+)", all_text, re.I)
     declared = int(m.group(1).replace(",", "")) if m else None
     state = None
     constituency = None
     for h in soup.find_all(["h3", "h4", "h5", "h6"]):
         value = text(h)
-        match = re.match(r"(.+?)\\s*\\(([^()]+)\\)\\s*$", value)
+        match = re.match(r"(.+?)\s*\(([^()]+)\)\s*$", value)
         if match and len(value) < 140 and not re.search(r"criminal|asset|education|detail", value, re.I):
             constituency, state = match.group(1).strip(), match.group(2).strip()
             break
@@ -138,7 +138,7 @@ def parse_profile(soup: BeautifulSoup):
     cases = []
     seen = set()
     def add_case(section, vals):
-        if len(vals) < 4 or not re.match(r"^\\d+\\b", vals[0] or ""):
+        if len(vals) < 4 or not re.match(r"^\d+\b", vals[0] or ""):
             return
         key = (section, tuple(vals))
         if key in seen:
@@ -171,7 +171,7 @@ def parse_profile(soup: BeautifulSoup):
     heading_tags = {"h3", "h4", "h5", "h6"}
     for heading in soup.find_all(["h3", "h4", "h5", "h6"]):
         label = text(heading)
-        if not re.search(r"Cases\\s+where\\s+(Pending|Convicted)", label, re.I):
+        if not re.search(r"Cases\s+where\s+(Pending|Convicted)", label, re.I):
             continue
         section = "Pending" if re.search(r"Pending", label, re.I) else "Convicted"
         for node in heading.find_all_next(["tr", "h3", "h4", "h5", "h6"]):
@@ -184,9 +184,9 @@ def parse_profile(soup: BeautifulSoup):
         for table in soup.find_all("table"):
             prior_heading = table.find_previous(["h3", "h4", "h5", "h6"])
             prior_label = text(prior_heading)
-            if re.search(r"Cases\\s+where\\s+Pending", prior_label, re.I):
+            if re.search(r"Cases\s+where\s+Pending", prior_label, re.I):
                 section = "Pending"
-            elif re.search(r"Cases\\s+where\\s+Convicted", prior_label, re.I):
+            elif re.search(r"Cases\s+where\s+Convicted", prior_label, re.I):
                 section = "Convicted"
             else:
                 continue
@@ -259,7 +259,7 @@ def import_once():
                     if name_key and state_key and props.get(name_key) and props.get(state_key):
                         nm, st = str(props[name_key]).strip(), str(props[state_key]).strip()
                         state_by_constituency[slug(nm)] = st
-                        state_by_constituency[slug(re.sub(r"\\s*\\((SC|ST)\\)$", "", nm, flags=re.I))] = st
+                        state_by_constituency[slug(re.sub(r"\s*\((SC|ST)\)$", "", nm, flags=re.I))] = st
             except Exception as exc:
                 log.warning("Could not fetch fallback constituency-state map: %s", exc)
 
@@ -280,7 +280,7 @@ def import_once():
                         profile_error = str(profile_exc)
                     name = winner["name"]
                     constituency = parsed["constituency"] or winner["constituency"]
-                    state = parsed["state"] or state_by_constituency.get(slug(constituency)) or state_by_constituency.get(slug(re.sub(r"\\s*\\((SC|ST)\\)$", "", constituency, flags=re.I))) or "Unknown state"
+                    state = parsed["state"] or state_by_constituency.get(slug(constituency)) or state_by_constituency.get(slug(re.sub(r"\s*\((SC|ST)\)$", "", constituency, flags=re.I))) or "Unknown state"
                     declared = parsed["declared_count"] if parsed["declared_count"] is not None else winner["declared_count"]
                     rows = parsed["cases"]
                     if profile_ok and winner["declared_count"] and not rows and idx <= 3:
@@ -288,7 +288,7 @@ def import_once():
                         case_table_samples = []
                         for tbl in profile_soup.find_all("table"):
                             hdr = text(tbl.find("tr"))
-                            if re.search(r"FIR\\s*No|Case\\s*No|IPC\\s*Sections", hdr, re.I):
+                            if re.search(r"FIR\s*No|Case\s*No|IPC\s*Sections", hdr, re.I):
                                 sample_rows = []
                                 for tr in tbl.find_all("tr")[:3]:
                                     sample_rows.append([text(cell) for cell in tr.find_all(["td","th"])][:10])
