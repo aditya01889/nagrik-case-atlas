@@ -5,6 +5,8 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 _raw_database_url = os.getenv("DATABASE_URL", "").strip()
 if os.getenv("VERCEL") == "1" and not _raw_database_url:
     raise RuntimeError("DATABASE_URL is required on Vercel; configure a persistent PostgreSQL database.")
+if os.getenv("RENDER", "").lower() == "true" and not _raw_database_url:
+    raise RuntimeError("DATABASE_URL is required on Render; configure the persistent PostgreSQL database before serving requests.")
 
 if _raw_database_url.startswith("postgres://"):
     DATABASE_URL = "postgresql+psycopg://" + _raw_database_url[len("postgres://"):]
