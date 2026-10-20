@@ -2,7 +2,7 @@ databases:
   - name: nagrik-case-atlas-db
     databaseName: nagrik_case_atlas
     user: nagrik_case_atlas
-    plan: basic-256mb
+    plan: free
     postgresMajorVersion: "16"
 
 services:
