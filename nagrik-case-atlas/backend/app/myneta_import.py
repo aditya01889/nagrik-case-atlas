@@ -378,6 +378,7 @@ def import_once():
                                 case.statutory_provisions=statutory; case.source_document_id=source_id
                                 case.source_url=profile_url; case.declared_in_affidavit=True; case.verification_status="verified"
                                 case.seriousness_basis="Not classified; no automatic offence-severity inference applied."
+                            db.flush()
                             link_id = f"{case_id}:{person_id}"
                             link = db.scalar(select(CasePersonLink).where(CasePersonLink.case_id==case_id, CasePersonLink.person_id==person_id))
                             if not link:
