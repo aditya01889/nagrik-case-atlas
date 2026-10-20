@@ -1,4 +1,4 @@
-import os, uuid
+import os, uuid, threading
 from urllib.parse import urlparse
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -63,20 +63,29 @@ def candidates(legislature: str="lok_sabha", constituency_name: str="", state: s
         for link in links:
             case=db.get(CaseRecord,link.case_id)
             if history_mode=="known" and case.created_at and case.created_at.date()>as_of: continue
-            if history_mode=="corrected" and not case.filed_date: continue
+            if history_mode=="corrected" and not case.filed_date:
+                source_snapshot = db.get(SourceDocument, case.source_document_id) if case.source_document_id else None
+                if not source_snapshot or source_snapshot.source_type != "adr_myneta_candidate_affidavit" or as_of < date(2024,6,4): continue
             evq=select(CaseEvent).where(CaseEvent.case_id==case.id, CaseEvent.verification_status=="verified")
             evq=evq.where(CaseEvent.source_document_id.in_(select(SourceDocument.id).where(SourceDocument.verification_status=="verified")))
             if history_mode=="known": evq=evq.where(CaseEvent.recorded_at<=datetime.combine(as_of,datetime.max.time(),timezone.utc))
             else: evq=evq.where(CaseEvent.event_date<=as_of)
             evs=db.scalars(evq.order_by(CaseEvent.event_date.desc(),CaseEvent.recorded_at.desc())).all()
-            status=evs[0].status_after_event if evs and evs[0].status_after_event else "Status not recorded"
+            if evs and evs[0].status_after_event:
+                status=evs[0].status_after_event
+            elif case.case_title.startswith("Pending as disclosed"):
+                status="Pending as declared in 2024 affidavit; current court status not checked"
+            elif case.case_title.startswith("Convicted as disclosed"):
+                status="Convicted as declared in 2024 affidavit; current court status not checked"
+            else:
+                status="Status not recorded"
             if not evs and case.filed_date and case.filed_date>as_of: continue
             if case.filed_date and case.filed_date>as_of: continue
             cases.append({"id":case.id,"case_title":case.case_title,"case_number":case.case_number,"court_name":case.court_name,"description":case.offence_summary,"statutory_provisions":case.statutory_provisions,"is_serious":case.is_serious,"seriousness_rank":case.seriousness_rank,"declared_in_affidavit":case.declared_in_affidavit,"current_status":status,"source_url":case.source_url,"last_verified_at":evs[0].verified_at.isoformat() if evs and evs[0].verified_at else None,"event_history":[{"event_date":e.event_date.isoformat(),"type":e.event_type,"summary":e.summary,"status":e.status_after_event,"source_document_id":e.source_document_id} for e in reversed(evs)]})
         serious=[c for c in cases if c["is_serious"]]
         ranked=[c for c in cases if c.get("seriousness_rank") is not None]
         most=sorted(ranked,key=lambda c:(c["seriousness_rank"],c["case_title"]))
-        items.append({"candidate_id":cand.person_id,"name":cand.person.full_name,"party_name":cand.party.name if cand.party else "Independent / not recorded","candidacy_status":cand.status,"verification_status":cand.verification_status,"verified_case_count":len({c['id'] for c in cases}),"declared_case_count":len({c['id'] for c in cases if c.get('declared_in_affidavit')}),"serious_case_count":len({c['id'] for c in serious}),"most_serious_case":{"description":most[0]["description"],"status":most[0]["current_status"],"court_name":most[0]["court_name"],"source_url":most[0]["source_url"]} if most else None,"cases":cases})
+        items.append({"candidate_id":cand.person_id,"name":cand.person.full_name,"party_name":cand.party.name if cand.party else "Independent / not recorded","candidacy_status":cand.status,"verification_status":cand.verification_status,"verified_case_count":len({c['id'] for c in cases}),"declared_case_count":len({c['id'] for c in cases if c.get('declared_in_affidavit')}),"serious_case_count":len({c['id'] for c in serious}),"seriousness_assessed":bool(cases) and all(not (db.get(CaseRecord, c['id']).seriousness_basis or "").startswith("Not classified") for c in cases),"most_serious_case":{"description":most[0]["description"],"status":most[0]["current_status"],"court_name":most[0]["court_name"],"source_url":most[0]["source_url"]} if most else None,"cases":cases})
     if sort=="name": items.sort(key=lambda x:x["name"].casefold())
     elif sort=="serious": items.sort(key=lambda x:(x["serious_case_count"],x["verified_case_count"],x["name"].casefold()))
     else: items.sort(key=lambda x:(x["verified_case_count"],x["name"].casefold()))
@@ -151,6 +160,20 @@ def review_queue(authorization: str|None=Header(default=None), db: Session=Depen
     docs=db.scalars(select(SourceDocument).where(SourceDocument.verification_status.in_(["discovered","needs_review"])).order_by(SourceDocument.retrieved_at.desc()).limit(200)).all()
     events=db.scalars(select(CaseEvent).where(CaseEvent.verification_status.in_(["discovered","needs_review"])).order_by(CaseEvent.recorded_at.desc()).limit(200)).all()
     return {"documents":[{"id":d.id,"title":d.title,"url":d.source_url,"status":d.verification_status} for d in docs],"events":[{"id":e.id,"case_id":e.case_id,"summary":e.summary,"event_date":e.event_date.isoformat(),"status":e.verification_status} for e in events]}
+
+
+@app.get("/api/import-status")
+def import_status():
+    """Public progress/status for the one-time 2024 source import; contains no secrets."""
+    from .myneta_import import STATUS
+    return dict(STATUS)
+
+
+@app.on_event("startup")
+def start_optional_historical_import():
+    if os.getenv("NCA_IMPORT_MYNETA_LS2024", "").strip().lower() in {"1", "true", "yes"}:
+        from .myneta_import import import_once
+        threading.Thread(target=import_once, name="myneta-ls2024-import", daemon=True).start()
 
 if WEB_DIR.exists():
     @app.get("/", include_in_schema=False)
