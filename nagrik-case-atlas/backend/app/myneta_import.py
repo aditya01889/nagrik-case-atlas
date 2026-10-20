@@ -284,11 +284,22 @@ def import_once():
                     declared = parsed["declared_count"] if parsed["declared_count"] is not None else winner["declared_count"]
                     rows = parsed["cases"]
                     if profile_ok and winner["declared_count"] and not rows and idx <= 3:
-                        log.warning("MyNeta profile parser diagnostic: url=%s title=%r declared_summary=%s parsed_declared=%s tables=%s rows=%s headings=%r text_sample=%r",
+                        all_profile_text = " ".join(profile_soup.get_text(" ", strip=True).split())
+                        case_table_samples = []
+                        for tbl in profile_soup.find_all("table"):
+                            hdr = text(tbl.find("tr"))
+                            if re.search(r"FIR\\s*No|Case\\s*No|IPC\\s*Sections", hdr, re.I):
+                                sample_rows = []
+                                for tr in tbl.find_all("tr")[:3]:
+                                    sample_rows.append([text(cell) for cell in tr.find_all(["td","th"])][:10])
+                                case_table_samples.append({"header": hdr[:180], "previous_heading": text(tbl.find_previous(["h3","h4","h5","h6"])), "rows": sample_rows})
+                        count_pos = all_profile_text.lower().find("number of criminal cases")
+                        count_snippet = all_profile_text[max(0, count_pos-20):count_pos+100] if count_pos >= 0 else "LABEL NOT FOUND"
+                        log.warning("MyNeta profile parser diagnostic: url=%s title=%r declared_summary=%s parsed_declared=%s tables=%s rows=%s count_snippet=%r headings=%r case_tables=%r",
                                     profile_url, text(profile_soup.title), winner["declared_count"], parsed["declared_count"],
-                                    len(profile_soup.find_all("table")), len(profile_soup.find_all("tr")),
+                                    len(profile_soup.find_all("table")), len(profile_soup.find_all("tr")), count_snippet,
                                     [text(h) for h in profile_soup.find_all(["h3","h4","h5","h6"]) if re.search(r"Cases|Criminal", text(h), re.I)][:10],
-                                    " ".join(profile_soup.get_text(" ", strip=True).split())[:260])
+                                    case_table_samples[:3])
                     exact = declared is not None and len(rows) == declared
                     if not exact:
                         review += 1
