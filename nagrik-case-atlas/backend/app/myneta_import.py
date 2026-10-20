@@ -17,7 +17,7 @@ from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy import select
+from sqlalchemy import select, func
 from .db import Base, engine, SessionLocal
 from .models import Constituency, Person, Party, Candidacy, CaseRecord, CasePersonLink, SourceDocument
 
@@ -191,7 +191,12 @@ def import_once():
     db = SessionLocal()
     try:
         if db.get(SourceDocument, "bootstrap-myneta-ls2024-complete"):
-            STATUS.update(state="complete", finished_at=date.today().isoformat())
+            people_count = db.scalar(select(func.count()).select_from(Candidacy).where(Candidacy.id.like("myneta-ls2024-candidacy-%"))) or 0
+            case_count = db.scalar(select(func.count()).select_from(CaseRecord).where(CaseRecord.id.like("myneta-ls2024-case-%"))) or 0
+            review_count = db.scalar(select(func.count()).select_from(Candidacy).where(Candidacy.id.like("myneta-ls2024-candidacy-%"), Candidacy.verification_status=="needs_review")) or 0
+            STATUS.update(state="complete", finished_at=date.today().isoformat(), candidates_seen=543,
+                          candidates_imported=people_count, case_rows_imported=case_count, needs_review=review_count)
+            log.warning("MyNeta 2024 import already complete: %s source-linked winners, %s case rows, %s candidate records flagged for review", people_count, case_count, review_count)
             return
     finally:
         db.close()
@@ -318,7 +323,7 @@ def import_once():
                     log.exception("Failed importing MyNeta profile %s: %s", profile_url, exc)
                 STATUS.update(candidates_imported=imported, case_rows_imported=case_rows, needs_review=review)
                 if idx % 25 == 0:
-                    log.info("MyNeta 2024 import progress: %s/%s profiles; %s case rows; %s review flags",
+                    log.warning("MyNeta 2024 import progress: %s/%s profiles; %s case rows; %s review flags",
                              idx, len(winners), case_rows, review)
                 time.sleep(0.2)
         if imported < 450:
@@ -335,7 +340,7 @@ def import_once():
         finally:
             db.close()
         STATUS.update(state="complete", finished_at=date.today().isoformat())
-        log.info("MyNeta 2024 import complete: %s candidates, %s case rows, %s review flags", imported, case_rows, review)
+        log.warning("MyNeta 2024 import complete: %s candidates, %s case rows, %s review flags", imported, case_rows, review)
     except Exception as exc:
         STATUS.update(state="error", finished_at=date.today().isoformat(), error=str(exc))
         log.exception("MyNeta 2024 import failed: %s", exc)
