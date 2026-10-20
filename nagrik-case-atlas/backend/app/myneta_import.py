@@ -120,11 +120,11 @@ def fetch_winners(client: httpx.Client):
 
 def parse_profile(soup: BeautifulSoup):
     all_text = text(soup)
-    m = re.search(r"Number of Criminal Cases\s*:\s*([\d,]+)", all_text, re.I)
+    m = re.search(r"Number of Criminal Cases\s*:?\s*([\d,]+)", all_text, re.I)
     declared = int(m.group(1).replace(",", "")) if m else None
     state = None
     constituency = None
-    for h in soup.find_all(["h4", "h5", "h6"]):
+    for h in soup.find_all(["h3", "h4", "h5", "h6"]):
         value = text(h)
         match = re.match(r"(.+?)\s*\(([^()]+)\)\s*$", value)
         if match and len(value) < 140 and not re.search(r"criminal|asset|education|detail", value, re.I):
@@ -378,7 +378,7 @@ def import_once():
                 title="ADR/MyNeta Lok Sabha 2024 winners baseline import",
                 source_type="dataset_import_run", source_url=WINNERS_URL, published_date=None,
                 verification_status="verified", reviewer="automated-source-match",
-                review_notes=f"Imported {imported} source-linked winner profiles from the ADR/MyNeta 2024 list (the list reports 543 winners; coverage is incomplete where individual profiles were unavailable). Parsed {case_rows} declared-case rows. {review} profile(s) need review because counts failed to match or fetches failed. Source-match does not mean independent court verification.")
+                review_notes=f"Imported {imported} source-linked profiles out of 543 winners reported by ADR/MyNeta; {len(winners)} profile links were extractable from the winner list. Parsed {case_rows} individual case rows. {review} profile(s) need case-detail review because row counts failed to match or profile fetches failed. Summary counts are distinct from parsed case details; source-match does not mean independent court verification.")
             db.add(marker)
             db.commit()
         finally:
