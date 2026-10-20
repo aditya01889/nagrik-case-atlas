@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: explorer
+      POSTGRES_USER: explorer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-before-deployment}
+    volumes:
+      - explorer_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U explorer -d explorer"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://explorer:${POSTGRES_PASSWORD:-change-this-before-deployment}@db:5432/explorer
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      ALLOWED_SOURCE_HOSTS: ${ALLOWED_SOURCE_HOSTS:-eci.gov.in,affidavit.eci.gov.in,services.ecourts.gov.in,hcservices.ecourts.gov.in,ecourts.gov.in,sci.gov.in,main.sci.gov.in}
+      MONITOR_INTERVAL_HOURS: ${MONITOR_INTERVAL_HOURS:-6}
+      WEB_DIR: /workspace/web
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./data:/workspace/data
+    depends_on:
+      db:
+        condition: service_healthy
+  monitor:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "backend.app.monitor"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-explorer}:${POSTGRES_PASSWORD:-change-this-before-deployment}@db:5432/${POSTGRES_DB:-explorer}
+      ALLOWED_SOURCE_HOSTS: ${ALLOWED_SOURCE_HOSTS:-eci.gov.in,affidavit.eci.gov.in,services.ecourts.gov.in,hcservices.ecourts.gov.in,ecourts.gov.in,sci.gov.in,main.sci.gov.in}
+      MONITOR_INTERVAL_HOURS: ${MONITOR_INTERVAL_HOURS:-6}
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["monitoring"]
+volumes:
+  explorer_db:

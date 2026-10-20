@@ -1,0 +1,16 @@
+{
+  "lok_sabha": {
+    "url": "https://interns.city/data/pc-boundaries.geojson",
+    "expected_features": 543,
+    "status": "prototype-source-only",
+    "validation_status": "unverified",
+    "notes": "Published simplified constituency GeoJSON. Validate against applicable official delimitation orders and check licence/source notes before production. Feature count is not proof of boundary correctness."
+  },
+  "assembly": {
+    "url": null,
+    "expected_features": null,
+    "status": "not-configured",
+    "validation_status": "unverified",
+    "notes": "Do not enable the Assembly layer until a current national/statewise dataset is reconciled against official election and delimitation records."
+  }
+}
