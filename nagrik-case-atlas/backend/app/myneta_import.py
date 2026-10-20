@@ -270,7 +270,8 @@ def import_once():
                         response = client.get(profile_url)
                         response.raise_for_status()
                         profile_ok = True
-                        parsed = parse_profile(BeautifulSoup(response.text, "html.parser"))
+                        profile_soup = BeautifulSoup(response.text, "html.parser")
+                        parsed = parse_profile(profile_soup)
                     except Exception as profile_exc:
                         profile_error = str(profile_exc)
                     name = winner["name"]
