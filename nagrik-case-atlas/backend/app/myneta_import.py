@@ -133,47 +133,62 @@ def parse_profile(soup: BeautifulSoup):
 
     cases = []
     seen = set()
+    def add_case(section, vals):
+        if len(vals) < 4 or not re.match(r"^\\d+\\b", vals[0] or ""):
+            return
+        key = (section, tuple(vals))
+        if key in seen:
+            return
+        seen.add(key)
+        fir = vals[1] if len(vals) > 1 else ""
+        case_no = vals[2] if len(vals) > 2 else ""
+        court = vals[3] if len(vals) > 3 else ""
+        provisions = vals[4] if len(vals) > 4 else ""
+        other_acts = vals[5] if len(vals) > 5 else ""
+        charges_framed = vals[6] if len(vals) > 6 else ""
+        charges_date = vals[7] if len(vals) > 7 else ""
+        appeal_status = vals[8] if len(vals) > 8 else ""
+        detail_parts = [
+            f"Disclosure section: Cases where {section}",
+            f"FIR as transcribed: {fir}" if fir else "",
+            f"Case number as transcribed: {case_no}" if case_no else "",
+            f"IPC/BNS sections as transcribed: {provisions}" if provisions else "",
+            f"Other acts/sections as transcribed: {other_acts}" if other_acts else "",
+            f"Charges framed field: {charges_framed}" if charges_framed else "",
+            f"Date charges framed field: {charges_date}" if charges_date else "",
+            f"Appeal/present-status field as disclosed: {appeal_status}" if appeal_status else "",
+            "Source is an ADR/MyNeta candidate-affidavit profile; allegations are not findings of guilt."
+        ]
+        cases.append({"section": section, "serial": vals[0], "fir": fir, "case_no": case_no,
+                      "court": court, "provisions": provisions, "other_acts": other_acts,
+                      "summary": "; ".join(part for part in detail_parts if part)})
+
+    # First pass: rows after the pending/convicted headings, stopping at the next heading.
     heading_tags = {"h3", "h4", "h5", "h6"}
     for heading in soup.find_all(["h3", "h4", "h5", "h6"]):
         label = text(heading)
         if not re.search(r"Cases\\s+where\\s+(Pending|Convicted)", label, re.I):
             continue
         section = "Pending" if re.search(r"Pending", label, re.I) else "Convicted"
-        # Iterate rows until the next section heading. This is more resilient than assuming
-        # the case rows are in the very next table (some MyNeta pages wrap tables differently).
         for node in heading.find_all_next(["tr", "h3", "h4", "h5", "h6"]):
             if node.name in heading_tags:
                 break
-            cells = node.find_all(["td", "th"], recursive=False)
-            vals = [text(cell) for cell in cells]
-            if len(vals) < 4 or not re.fullmatch(r"\\d+", vals[0] or ""):
+            add_case(section, [text(cell) for cell in node.find_all(["td", "th"])])
+
+    # Fallback: parse case tables directly and infer their section from the nearest prior heading.
+    if not cases:
+        for table in soup.find_all("table"):
+            prior_heading = table.find_previous(["h3", "h4", "h5", "h6"])
+            prior_label = text(prior_heading)
+            if re.search(r"Cases\\s+where\\s+Pending", prior_label, re.I):
+                section = "Pending"
+            elif re.search(r"Cases\\s+where\\s+Convicted", prior_label, re.I):
+                section = "Convicted"
+            else:
                 continue
-            key = (section, tuple(vals))
-            if key in seen:
-                continue
-            seen.add(key)
-            fir = vals[1] if len(vals) > 1 else ""
-            case_no = vals[2] if len(vals) > 2 else ""
-            court = vals[3] if len(vals) > 3 else ""
-            provisions = vals[4] if len(vals) > 4 else ""
-            other_acts = vals[5] if len(vals) > 5 else ""
-            charges_framed = vals[6] if len(vals) > 6 else ""
-            charges_date = vals[7] if len(vals) > 7 else ""
-            appeal_status = vals[8] if len(vals) > 8 else ""
-            detail_parts = [
-                f"Disclosure section: Cases where {section}",
-                f"FIR as transcribed: {fir}" if fir else "",
-                f"Case number as transcribed: {case_no}" if case_no else "",
-                f"IPC/BNS sections as transcribed: {provisions}" if provisions else "",
-                f"Other acts/sections as transcribed: {other_acts}" if other_acts else "",
-                f"Charges framed field: {charges_framed}" if charges_framed else "",
-                f"Date charges framed field: {charges_date}" if charges_date else "",
-                f"Appeal/present-status field as disclosed: {appeal_status}" if appeal_status else "",
-                "Source is an ADR/MyNeta candidate-affidavit profile; allegations are not findings of guilt."
-            ]
-            cases.append({"section": section, "serial": vals[0], "fir": fir, "case_no": case_no,
-                          "court": court, "provisions": provisions, "other_acts": other_acts,
-                          "summary": "; ".join(part for part in detail_parts if part)})
+            for row in table.find_all("tr"):
+                add_case(section, [text(cell) for cell in row.find_all(["td", "th"])])
+
     return {"declared_count": declared, "state": state, "constituency": constituency, "cases": cases}
 
 
@@ -185,7 +200,7 @@ def import_once():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        if db.get(SourceDocument, "bootstrap-myneta-ls2024-v2-complete"):
+        if db.get(SourceDocument, "bootstrap-myneta-ls2024-v3-complete"):
             people_count = db.scalar(select(func.count()).select_from(Candidacy).where(Candidacy.id.like("myneta-ls2024-candidacy-%"))) or 0
             case_count = db.scalar(select(func.count()).select_from(CaseRecord).where(CaseRecord.id.like("myneta-ls2024-case-%"))) or 0
             review_count = db.scalar(select(func.count()).select_from(Candidacy).where(Candidacy.id.like("myneta-ls2024-candidacy-%"), Candidacy.verification_status=="needs_review")) or 0
@@ -263,6 +278,12 @@ def import_once():
                     state = parsed["state"] or state_by_constituency.get(slug(constituency)) or state_by_constituency.get(slug(re.sub(r"\\s*\\((SC|ST)\\)$", "", constituency, flags=re.I))) or "Unknown state"
                     declared = parsed["declared_count"] if parsed["declared_count"] is not None else winner["declared_count"]
                     rows = parsed["cases"]
+                    if profile_ok and winner["declared_count"] and not rows and idx <= 3:
+                        log.warning("MyNeta profile parser diagnostic: url=%s title=%r declared_summary=%s parsed_declared=%s tables=%s rows=%s headings=%r text_sample=%r",
+                                    profile_url, text(profile_soup.title), winner["declared_count"], parsed["declared_count"],
+                                    len(profile_soup.find_all("table")), len(profile_soup.find_all("tr")),
+                                    [text(h) for h in profile_soup.find_all(["h3","h4","h5","h6"]) if re.search(r"Cases|Criminal", text(h), re.I)][:10],
+                                    " ".join(profile_soup.get_text(" ", strip=True).split())[:260])
                     exact = declared is not None and len(rows) == declared
                     if not exact:
                         review += 1
