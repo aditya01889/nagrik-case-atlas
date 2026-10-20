@@ -24,6 +24,7 @@ from .models import Constituency, Person, Party, Candidacy, CaseRecord, CasePers
 log = logging.getLogger("nagrik_case_atlas.myneta_import")
 BASE = "https://www.myneta.info/LokSabha2024/"
 WINNERS_URL = BASE + "index.php?action=show_winners&sort=candidate"
+BOUNDARY_URL = "https://interns.city/data/pc-boundaries.geojson"
 SNAPSHOT_DATE = date(2024, 6, 4)
 STATUS = {"state": "idle", "started_at": None, "finished_at": None, "candidates_seen": 0,
           "candidates_imported": 0, "case_rows_imported": 0, "needs_review": 0, "error": None}
@@ -190,7 +191,7 @@ def import_once():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        if db.get(SourceDocument, "bootstrap-myneta-ls2024-complete"):
+        if db.get(SourceDocument, "bootstrap-myneta-ls2024-v2-complete"):
             people_count = db.scalar(select(func.count()).select_from(Candidacy).where(Candidacy.id.like("myneta-ls2024-candidacy-%"))) or 0
             case_count = db.scalar(select(func.count()).select_from(CaseRecord).where(CaseRecord.id.like("myneta-ls2024-case-%"))) or 0
             review_count = db.scalar(select(func.count()).select_from(Candidacy).where(Candidacy.id.like("myneta-ls2024-candidacy-%"), Candidacy.verification_status=="needs_review")) or 0
@@ -205,54 +206,97 @@ def import_once():
     case_rows = 0
     review = 0
     try:
-        headers = {"User-Agent": "NagrikCaseAtlas/0.1 (public-interest research; contact via GitHub repository)"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": WINNERS_URL,
+        }
         with httpx.Client(timeout=30, follow_redirects=True, headers=headers) as client:
             winners = fetch_winners(client)
             STATUS["candidates_seen"] = len(winners)
+            db = SessionLocal()
+            try:
+                summary = db.get(SourceDocument, "myneta-ls2024-summary")
+                summary_notes = f"Candidate names, constituencies, parties and declared-case counts transcribed from the ADR/MyNeta Lok Sabha 2024 winners list. The list reports 543 winners; {len(winners)} individual profile links were extractable. Coverage is partial; not an independent court-record verification."
+                if not summary:
+                    summary = SourceDocument(id="myneta-ls2024-summary", title="ADR/MyNeta — Lok Sabha 2024 list of winners",
+                        source_type="adr_myneta_winners_summary", source_url=WINNERS_URL, published_date=None,
+                        verification_status="verified", reviewer="automated-source-match", review_notes=summary_notes)
+                    db.add(summary)
+                else:
+                    summary.source_url=WINNERS_URL; summary.verification_status="verified"
+                    summary.reviewer="automated-source-match"; summary.review_notes=summary_notes
+                db.commit()
+            finally:
+                db.close()
+
+            state_by_constituency = {}
+            try:
+                br = client.get(BOUNDARY_URL)
+                br.raise_for_status()
+                for feature in br.json().get("features", []):
+                    props = feature.get("properties") or {}
+                    keys = list(props)
+                    name_key = next((k for k in keys if re.fullmatch(r"(pc_name|pcname|constituency_name|constituency|name|pc_nm|pc_name_en|pcname_en)", k, re.I)), None)
+                    if not name_key:
+                        name_key = next((k for k in keys if re.search(r"(constituency|pc.?name|seat.?name|name)", k, re.I)), None)
+                    state_key = next((k for k in keys if re.fullmatch(r"(state_name|state|st_name|state_nm|state_name_en)", k, re.I)), None)
+                    if not state_key:
+                        state_key = next((k for k in keys if re.search(r"state", k, re.I)), None)
+                    if name_key and state_key and props.get(name_key) and props.get(state_key):
+                        nm, st = str(props[name_key]).strip(), str(props[state_key]).strip()
+                        state_by_constituency[slug(nm)] = st
+                        state_by_constituency[slug(re.sub(r"\\s*\\((SC|ST)\\)$", "", nm, flags=re.I))] = st
+            except Exception as exc:
+                log.warning("Could not fetch fallback constituency-state map: %s", exc)
+
             for idx, winner in enumerate(winners, start=1):
                 pid = winner["profile_id"]
                 profile_url = winner["url"]
                 try:
-                    response = client.get(profile_url)
-                    response.raise_for_status()
-                    parsed = parse_profile(BeautifulSoup(response.text, "html.parser"))
-                    page_name = None
-                    for h in BeautifulSoup(response.text, "html.parser").find_all("h2"):
-                        if text(h) and len(text(h)) < 160:
-                            page_name = text(h)
-                            break
+                    profile_ok = False
+                    parsed = {"declared_count": None, "state": None, "constituency": None, "cases": []}
+                    profile_error = None
+                    try:
+                        response = client.get(profile_url)
+                        response.raise_for_status()
+                        profile_ok = True
+                        parsed = parse_profile(BeautifulSoup(response.text, "html.parser"))
+                    except Exception as profile_exc:
+                        profile_error = str(profile_exc)
                     name = winner["name"]
-                    state = parsed["state"] or "Unknown state"
                     constituency = parsed["constituency"] or winner["constituency"]
-                    declared = parsed["declared_count"]
+                    state = parsed["state"] or state_by_constituency.get(slug(constituency)) or state_by_constituency.get(slug(re.sub(r"\\s*\\((SC|ST)\\)$", "", constituency, flags=re.I))) or "Unknown state"
+                    declared = parsed["declared_count"] if parsed["declared_count"] is not None else winner["declared_count"]
                     rows = parsed["cases"]
                     exact = declared is not None and len(rows) == declared
-                    if declared is None:
+                    if not exact:
                         review += 1
-                    elif not exact:
-                        review += 1
-                    status = "verified" if exact else "needs_review"
+                    candidate_status = "verified" if winner["declared_count"] is not None and state != "Unknown state" else "needs_review"
+                    profile_status = "verified" if profile_ok and (parsed["declared_count"] is not None or rows or winner["declared_count"] == 0) else "needs_review"
                     source_id = f"myneta-ls2024-source-{pid}"
                     person_id = f"myneta-ls2024-person-{pid}"
                     party_id = f"party-{slug(winner['party'])}"
                     constituency_id = f"lok_sabha:{slug(state)}:{slug(constituency)}"
-                    notes = ("Automated source match against the candidate's ADR/MyNeta 2024 affidavit profile. "
+                    notes = ("Candidate and declared total are source-matched to the ADR/MyNeta 2024 winners summary. "
                              "Not independently cross-checked against the original ECI affidavit or current court records. "
-                             f"Summary declares {declared if declared is not None else 'an unknown number of'} cases; "
-                             f"{len(rows)} case rows parsed. Status: {'row count matched' if exact else 'manual review required'}.")
+                             f"Summary declares {winner['declared_count']} cases; {len(rows)} individual case rows parsed. "
+                             f"Case-detail status: {'row count matched' if exact else 'manual review required'}. "
+                             f"Profile URL: {profile_url}. "
+                             + (f"Profile fetch/parser note: {profile_error}." if profile_error else ""))
                     db = SessionLocal()
                     try:
                         source = db.get(SourceDocument, source_id)
                         if not source:
                             source = SourceDocument(id=source_id, title=f"Lok Sabha 2024 affidavit profile — {name}",
                                 source_type="adr_myneta_candidate_affidavit", source_url=profile_url,
-                                published_date=None, verification_status="verified", reviewer="automated-source-match",
+                                published_date=None, verification_status=profile_status, reviewer="automated-source-match",
                                 review_notes=notes)
                             db.add(source)
                         else:
                             source.title = f"Lok Sabha 2024 affidavit profile — {name}"
                             source.source_url = profile_url
-                            source.verification_status = "verified"
+                            source.verification_status = profile_status
                             source.reviewer = "automated-source-match"
                             source.review_notes = notes
                         party = db.get(Party, party_id)
@@ -276,13 +320,13 @@ def import_once():
                         if not cand:
                             cand = Candidacy(id=candidacy_id, person_id=person_id, constituency_id=constituency_id,
                                 party_id=party_id, election_date=SNAPSHOT_DATE, status="elected",
-                                source_document_id=source_id, valid_from=SNAPSHOT_DATE, valid_to=None,
-                                verification_status=status, verification_notes=notes)
+                                source_document_id="myneta-ls2024-summary", valid_from=SNAPSHOT_DATE, valid_to=None,
+                                verification_status=candidate_status, verification_notes=notes)
                             db.add(cand)
                         else:
                             cand.person_id=person_id; cand.constituency_id=constituency_id; cand.party_id=party_id
-                            cand.election_date=SNAPSHOT_DATE; cand.status="elected"; cand.source_document_id=source_id
-                            cand.valid_from=SNAPSHOT_DATE; cand.verification_status=status; cand.verification_notes=notes
+                            cand.election_date=SNAPSHOT_DATE; cand.status="elected"; cand.source_document_id="myneta-ls2024-summary"
+                            cand.valid_from=SNAPSHOT_DATE; cand.verification_status=candidate_status; cand.verification_notes=notes
                         db.flush()
                         for n, item in enumerate(rows, start=1):
                             case_id = f"myneta-ls2024-case-{pid}-{slug(item['section'])}-{n}"
@@ -330,7 +374,7 @@ def import_once():
             raise RuntimeError(f"Only {imported} source-linked profiles imported successfully; completion marker withheld for safe retry.")
         db = SessionLocal()
         try:
-            marker = SourceDocument(id="bootstrap-myneta-ls2024-complete",
+            marker = SourceDocument(id="bootstrap-myneta-ls2024-v2-complete",
                 title="ADR/MyNeta Lok Sabha 2024 winners baseline import",
                 source_type="dataset_import_run", source_url=WINNERS_URL, published_date=None,
                 verification_status="verified", reviewer="automated-source-match",
