@@ -66,7 +66,7 @@
   const map = new maplibregl.Map({container:'map',style:'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',center:[79.5,22.7],zoom:3.55,minZoom:2,maxZoom:11,attributionControl:true});
   map.addControl(new maplibregl.NavigationControl({showCompass:false}), 'bottom-right');
   map.addControl(new maplibregl.ScaleControl({maxWidth:90,unit:'metric'}),'bottom-right');
-  fetch(`${API_BASE}/api/health`).then(r=>r.ok?r.json():Promise.reject()).then(h=>{if(h.database!=='ok')throw new Error('database unavailable');return fetch(`${API_BASE}/api/coverage`).then(r=>r.ok?r.json():Promise.reject()).then(c=>{const verifiedCases=Number(c.verified_cases||0);$('apiStatus').textContent=verifiedCases>0?`API CONNECTED · ${verifiedCases} VERIFIED CASES`:'API CONNECTED · NO VERIFIED CASES LOADED';});}).catch(()=>{$('apiStatus').textContent='MAP PREVIEW · API OFFLINE';});
+  fetch(`${API_BASE}/api/health`).then(r=>r.ok?r.json():Promise.reject()).then(h=>{if(h.database!=='ok')throw new Error('database unavailable');return fetch(`${API_BASE}/api/coverage`).then(r=>r.ok?r.json():Promise.reject()).then(c=>{const verifiedCandidates=Number(c.verified_candidates||0);$('apiStatus').textContent=verifiedCandidates>0?`API CONNECTED · ${verifiedCandidates} SOURCE-MATCHED CANDIDATES`:'API CONNECTED · DATA IMPORT PENDING';});}).catch(()=>{$('apiStatus').textContent='MAP PREVIEW · API OFFLINE';});
   map.on('load', async () => {
     try {
       geojson = await loadBoundaryData();
