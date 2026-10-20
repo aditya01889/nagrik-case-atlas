@@ -68,7 +68,11 @@ def parse_winner_rows(soup: BeautifulSoup):
         link = row.find("a", href=re.compile(r"candidate\.php\?candidate_id=\d+"))
         if not link:
             continue
-        href = urljoin(BASE, link.get("href", ""))
+        raw_href = link.get("href", "")
+        if raw_href.startswith("/candidate.php"):
+            href = BASE + raw_href.lstrip("/")
+        else:
+            href = urljoin(BASE, raw_href)
         pid = profile_id(href)
         if not pid:
             continue
