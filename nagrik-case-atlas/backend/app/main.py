@@ -85,9 +85,9 @@ def candidates(legislature: str="lok_sabha", constituency_name: str="", state: s
         serious=[c for c in cases if c["is_serious"]]
         ranked=[c for c in cases if c.get("seriousness_rank") is not None]
         most=sorted(ranked,key=lambda c:(c["seriousness_rank"],c["case_title"]))
-        declared_match=re.search(r"Summary declares (\\d+) cases", cand.verification_notes or "")
+        declared_match=re.search(r"Summary declares (\d+) cases", cand.verification_notes or "")
         reported_declared_count=int(declared_match.group(1)) if declared_match else len({c["id"] for c in cases if c.get("declared_in_affidavit")})
-        profile_match=re.search(r"Profile URL:\\s*(https://\\S+)", cand.verification_notes or "")
+        profile_match=re.search(r"Profile URL:\s*(https://\S+)", cand.verification_notes or "")
         profile_url=profile_match.group(1).rstrip(".") if profile_match else None
         items.append({"candidate_id":cand.person_id,"name":cand.person.full_name,"party_name":cand.party.name if cand.party else "Independent / not recorded","candidacy_status":cand.status,"verification_status":cand.verification_status,"source_url":profile_url,"verified_case_count":len({c['id'] for c in cases}),"declared_case_count":reported_declared_count,"serious_case_count":len({c['id'] for c in serious}),"seriousness_assessed":bool(cases) and all(not (db.get(CaseRecord, c['id']).seriousness_basis or "").startswith("Not classified") for c in cases),"most_serious_case":{"description":most[0]["description"],"status":most[0]["current_status"],"court_name":most[0]["court_name"],"source_url":most[0]["source_url"]} if most else None,"cases":cases})
     if sort=="name": items.sort(key=lambda x:x["name"].casefold())
