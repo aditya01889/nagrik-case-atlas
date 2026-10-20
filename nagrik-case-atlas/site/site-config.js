@@ -1,5 +1,2 @@
-/* Optional API endpoint for the hosted frontend.
- * Leave empty while no backend has been deployed.
- * Example: window.NCA_API_BASE = 'https://api.example.org';
- */
-window.NCA_API_BASE = '';
+/* API endpoint for the hosted Nagrik Case Atlas frontend. */
+window.NCA_API_BASE = 'https://nagrik-case-atlas-api.onrender.com';
