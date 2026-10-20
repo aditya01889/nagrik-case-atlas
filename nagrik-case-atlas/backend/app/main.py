@@ -152,10 +152,24 @@ def review_queue(authorization: str|None=Header(default=None), db: Session=Depen
     events=db.scalars(select(CaseEvent).where(CaseEvent.verification_status.in_(["discovered","needs_review"])).order_by(CaseEvent.recorded_at.desc()).limit(200)).all()
     return {"documents":[{"id":d.id,"title":d.title,"url":d.source_url,"status":d.verification_status} for d in docs],"events":[{"id":e.id,"case_id":e.case_id,"summary":e.summary,"event_date":e.event_date.isoformat(),"status":e.verification_status} for e in events]}
 
-@app.get("/", include_in_schema=False)
-def home():
-    return FileResponse(WEB_DIR/"index.html")
-@app.get("/admin", include_in_schema=False)
-def admin_home():
-    return FileResponse(WEB_DIR/"admin.html")
-app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+if WEB_DIR.exists():
+    @app.get("/", include_in_schema=False)
+    def home():
+        index_file = WEB_DIR/"index.html"
+        if not index_file.exists():
+            raise HTTPException(404, "Frontend is hosted separately")
+        return FileResponse(index_file)
+
+    @app.get("/admin", include_in_schema=False)
+    def admin_home():
+        admin_file = WEB_DIR/"admin.html"
+        if not admin_file.exists():
+            raise HTTPException(404, "Admin UI is not configured")
+        return FileResponse(admin_file)
+
+    if (WEB_DIR/"static").exists():
+        app.mount("/static", StaticFiles(directory=str(WEB_DIR/"static")), name="static")
+else:
+    @app.get("/", include_in_schema=False)
+    def home():
+        return {"service": "Nagrik Case Atlas API", "health": "/api/health", "docs": "/docs"}
